@@ -1,14 +1,13 @@
 
 # coding: utf-8
 
-# In[1]:
+# In[ ]:
 
 
-# limitations under the License.
-# ==============================================================================
 import argparse
 import os
 import sys
+import subprocess
 
 import cv2
 import numpy as np
@@ -22,10 +21,27 @@ from espcn_pytorch import ESPCN
 
 
 
-# In[9]:
+# In[ ]:
+
+
+def extract_audio(video_in, audio_out):
+    subprocess.run(['ffmpeg', '-i', video_in, '-acodec', 'copy', audio_out])
+
+
+def add_audio(video_in, audio_in, video_out):
+    print(f'adding audio to {video_out}')
+    subprocess.run(['ffmpeg', '-i', video_in, '-i', audio_in, '-c:a', 'copy', '-c:v', 'libx264', '-crf', '20', '-preset', 'veryslow', '-bsf:a', 'aac_adtstoasc', '-profile:v', 'main', video_out])
+
+
+# In[ ]:
 
 
 # config
+tmp_dir = 'tmp'
+out_dir = 'out'
+
+os.makedirs(tmp_dir, exist_ok=True)
+os.makedirs(out_dir, exist_ok=True)
 
 args_cuda = True
 args_scale_factor = 2
@@ -41,6 +57,8 @@ args_view = False
 args_compare = False
 
 cudnn.benchmark = True
+
+file_name_bare = os.path.basename(video_name).strip('.mp4')
 
 # rest of code
 
@@ -66,6 +84,9 @@ pil2tensor = transforms.ToTensor()
 tensor2pil = transforms.ToPILImage()
 
 # Open video file
+print('Extracting audio')
+audio_path = f'{tmp_dir}/{file_name_bare}.aac'
+extract_audio(video_name, audio_path)
 
 print(f"Reading `{os.path.basename(video_name)}`...")
 video_capture = cv2.VideoCapture(video_name)
@@ -77,13 +98,18 @@ size = (int(video_capture.get(cv2.CAP_PROP_FRAME_WIDTH)), int(video_capture.get(
 sr_size = (size[0] * args_scale_factor, size[1] * args_scale_factor)
 pare_size = (sr_size[0] * 2 + 10, sr_size[1] + 10 + sr_size[0] // 5 - 9)
 # Video write loader.
-fn = f"out/{os.path.basename(video_name).strip('.mp4')}_{args_scale_factor}x"
-print(fn)
-srgan_writer = cv2.VideoWriter(f"{fn}_espcn.mp4",
+fn = f"{tmp_dir}/{file_name_bare}_{args_scale_factor}x"
+
+fn_side_by_side = f"{fn}_side_by_side.mp4"
+fn_srgan = f"{fn}_espcn.mp4"
+fn_compare = f"{fn}_compare.mp4"
+
+srgan_writer = cv2.VideoWriter(fn_srgan,
                                cv2.VideoWriter_fourcc(*"MPEG"), fps, sr_size)
-compare_writer = cv2.VideoWriter(f"{fn}_compare.mp4",
-                                 cv2.VideoWriter_fourcc(*"MPEG"), fps, pare_size)
-sidebyside_writer = cv2.VideoWriter(f"{fn}_side_by_side.mp4",
+if args_compare:
+    compare_writer = cv2.VideoWriter(fn_compare,
+                                     cv2.VideoWriter_fourcc(*"MPEG"), fps, pare_size)
+sidebyside_writer = cv2.VideoWriter(fn_side_by_side,
                                cv2.VideoWriter_fourcc(*"MPEG"), fps, sr_size)
 
 def merge(a, b, split=0.5):
@@ -93,7 +119,7 @@ def merge(a, b, split=0.5):
 
 # read frame
 success, raw_frame = video_capture.read()
-print('success', success)
+#print('success', success)
 progress_bar = tqdm(range(total_frames), desc="[processing video and saving/view result videos]")
 for index in progress_bar:
     if success:
@@ -162,5 +188,17 @@ for index in progress_bar:
 sidebyside_writer.release()
 compare_writer.release()
 srgan_writer.release()
+print('combining with audio')
+fn_out = f"{out_dir}/{file_name_bare}_{args_scale_factor}x"
+
+fn_out_side_by_side = f"{fn_out}_side_by_side.mp4"
+fn_out_srgan = f"{fn_out}_espcn.mp4"
+fn_out_compare = f"{fn_out}_compare.mp4"
+
+add_audio(fn_side_by_side, audio_path, fn_out_side_by_side)
+add_audio(fn_srgan, audio_path, fn_out_srgan)
+if args_compare:
+    add_audio(fn_compare, audio_path, fn_out_compare)
+
 print('done')
 
